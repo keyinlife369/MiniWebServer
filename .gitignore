@@ -1,0 +1,38 @@
+# 构建输出
+Debug/
+Release/
+x64/
+x86/
+build/
+bin/
+lib/
+
+# 编译文件
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+
+# 第三方库
+vcpkg_installed/
+packages/
+3rdparty/
+
+# IDE
+.vs/
+.vscode/
+*.user
+# 资源模型文件
+resources/models/
+*.obj
+*.fbx
+*.gltf
+*.glb
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tga

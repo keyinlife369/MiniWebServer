@@ -1,0 +1,134 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini Web Server</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .features {
+            text-align: left;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+            .features h3 {
+                margin-bottom: 15px;
+                color: #a6e3a1;
+            }
+
+            .features ul {
+                list-style: none;
+            }
+
+            .features li {
+                padding: 8px 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+                .features li:last-child {
+                    border-bottom: none;
+                }
+
+        .footer {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.9em;
+            margin-top: 20px;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            background: #a6e3a1;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1Mini Web Server</h1>
+        <p class="subtitle">
+            <span class="status"></span>服务器运行中
+        </p>
+
+        <div class="features">
+            <h3>技术栈</h3>
+            <ul>
+                <li>C++20 现代标准</li>
+                <li>Boost.Asio 异步 I/O</li>
+                <li>Qt6 图形界面</li>
+                <li>HTTP/1.1 GET/HEAD 支持</li>
+                <li>实时监控面板</li>
+                <li>Windows IOCP 高性能网络</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            <p>Mini Web Server v1.0 | Windows + VS2022</p>
+            <p>当前时间: <span id="time"></span></p>
+        </div>
+    </div>
+
+    <script>
+        function updateTime() {
+        document.getElementById('time').textContent = new Date().toLocaleString('zh-CN');
+        }
+        updateTime();
+        setInterval(updateTime, 1000);
+    </script>
+</body>
+</html>
