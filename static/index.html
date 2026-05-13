@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mini Web Server</title>
+    <title>杜浩哲 - 个人简历</title>
     <style>
         * {
             margin: 0;
@@ -27,7 +27,7 @@
             backdrop-filter: blur(10px);
             border-radius: 20px;
             padding: 40px;
-            max-width: 600px;
+            max-width: 900px;
             width: 100%;
             text-align: center;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
@@ -45,7 +45,7 @@
             font-size: 1.1em;
         }
 
-        .features {
+        .resume-block {
             text-align: left;
             background: rgba(0, 0, 0, 0.2);
             border-radius: 10px;
@@ -53,23 +53,49 @@
             margin-bottom: 20px;
         }
 
-            .features h3 {
-                margin-bottom: 15px;
-                color: #a6e3a1;
-            }
+        .resume-block h3 {
+            margin-bottom: 15px;
+            color: #a6e3a1;
+            font-size: 1.25em;
+            border-left: 4px solid #a6e3a1;
+            padding-left: 10px;
+        }
 
-            .features ul {
-                list-style: none;
-            }
+        .base-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            line-height: 1.8;
+            font-size: 1.05em;
+        }
 
-            .features li {
-                padding: 8px 0;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            }
+        .project-item {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
 
-                .features li:last-child {
-                    border-bottom: none;
-                }
+        .project-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .project-title {
+            color: #a6e3a1;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .resume-block p, .resume-block li {
+            line-height: 1.7;
+            margin-bottom: 6px;
+        }
+
+        .resume-block ul {
+            list-style-position: inside;
+            padding-left: 5px;
+        }
 
         .footer {
             color: rgba(255, 255, 255, 0.5);
@@ -81,7 +107,6 @@
             0%, 100% {
                 opacity: 1;
             }
-
             50% {
                 opacity: 0.5;
             }
@@ -100,32 +125,91 @@
 </head>
 <body>
     <div class="container">
-        <h1Mini Web Server</h1>
+        <h1>杜浩哲 · 个人简历</h1>
         <p class="subtitle">
-            <span class="status"></span>服务器运行中
+            <span class="status"></span>软件工程专业 | 高并发服务器 / 3D图形开发
         </p>
 
-        <div class="features">
-            <h3>技术栈</h3>
+        <!-- 基本信息 -->
+        <div class="resume-block">
+            <h3>基本信息</h3>
+            <div class="base-info">
+                <div>姓　　名：杜浩哲</div>
+                <div>性　　别：男</div>
+                <div>年　　龄：20岁</div>
+                <div>联系电话：15139988795</div>
+                <div>学　　历：本科</div>
+                <div>邮　　箱：3394271455@qq.com</div>
+            </div>
+        </div>
+
+        <!-- 教育经历 -->
+        <div class="resume-block">
+            <h3>教育经历</h3>
+            <p><strong>2023.09 - 2027.06</strong> &nbsp;&nbsp; 郑州财经学院 &nbsp;&nbsp; 软件工程专业</p>
+            <p style="margin-top:10px;"><strong>主修课程：</strong>数据结构，软件工程，linux系统及应用，算法设计，操作系统原理，计算机网络，面向对象程序设计，数据库原理</p>
+        </div>
+
+        <!-- 项目经历 -->
+        <div class="resume-block">
+            <h3>项目经历</h3>
+
+            <div class="project-item">
+                <p class="project-title">项目一：高并发 Web 服务器项目（2025.5 - 至今）</p>
+                <p><strong>GitHub：</strong>https://github.com/keyinlife369/MiniWebServer.git</p>
+                <p><strong>技术栈：</strong>C++20、Boost.Asio、Qt6、CMake、多线程、IOCP、HTTP/1.1、Git</p>
+                <p><strong>项目描述：</strong>支持高并发、异步非阻塞的 Web 服务器，并配套实时监控面板，用于深入理解网络服务底层原理</p>
+                <ul>
+                    <li>基于 Boost.Asio Proactor 模型 + Windows IOCP 实现核心网络框架</li>
+                    <li>设计线程池 + 异步事件循环架构，解耦 I/O 操作与业务计算，降低线程切换开销</li>
+                    <li>采用状态机模式自研 HTTP/1.1 协议解析器，支持 GET/HEAD 请求与 Keep-Alive 长连接</li>
+                    <li>使用 Qt6 开发可视化监控面板，实时展示 QPS、带宽、活动连接数等指标</li>
+                </ul>
+            </div>
+
+            <div class="project-item">
+                <p class="project-title">项目二：3D 图形展示器项目（2026.2 – 至今）</p>
+                <p><strong>GitHub：</strong>https://github.com/keyinlife369/GraphicsViewer.git</p>
+                <p><strong>技术栈：</strong>C++20, Qt6, OpenGL 4.5, GLSL, Assimp, GLM</p>
+                <p><strong>项目描述：</strong>桌面端 3D 模型渲染工具，支持多种主流格式加载和真实的材质光照效果</p>
+                <ul>
+                    <li>基于 Cook-Torrance BRDF 模型，构建 PBR 渲染管线，实现真实感光照</li>
+                    <li>实现实时阴影映射、HDR 色调映射，提升渲染效果与色彩还原度</li>
+                    <li>采用多模块架构分离渲染、资源、场景与 UI 逻辑</li>
+                    <li>使用 Qt6 构建完整图形界面，包含材质/光源编辑器和性能监控面板</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 专业技能 -->
+        <div class="resume-block">
+            <h3>专业技能</h3>
             <ul>
-                <li>C++20 现代标准</li>
-                <li>Boost.Asio 异步 I/O</li>
-                <li>Qt6 图形界面</li>
-                <li>HTTP/1.1 GET/HEAD 支持</li>
-                <li>实时监控面板</li>
-                <li>Windows IOCP 高性能网络</li>
+                <li>熟练使用 C++11/17/20，熟悉智能指针、移动语义、Lambda 等现代特性，理解多线程并发与内存管理</li>
+                <li>熟悉 TCP/IP 与 HTTP/1.1 协议，掌握 Boost.Asio 异步网络编程，有万级并发实战经验</li>
+                <li>掌握 OpenGL 4.5 与 GLSL，理解 PBR 渲染管线、Cook-Torrance BRDF 及 Shadow Mapping</li>
+                <li>熟练使用 Qt6、CMake、Git，具备独立项目构建与跨平台开发能力</li>
+            </ul>
+        </div>
+
+        <!-- 个人评价 -->
+        <div class="resume-block">
+            <h3>个人评价</h3>
+            <ul>
+                <li>具备较强的自驱力和钻研能力，能通过官方文档和源码独立解决复杂的技术难题</li>
+                <li>追求代码质量，在项目中注重性能、可读性与模块化设计的平衡</li>
             </ul>
         </div>
 
         <div class="footer">
-            <p>Mini Web Server v1.0 | Windows + VS2022</p>
+            <p>个人简历 | 实时更新</p>
             <p>当前时间: <span id="time"></span></p>
         </div>
     </div>
 
     <script>
         function updateTime() {
-        document.getElementById('time').textContent = new Date().toLocaleString('zh-CN');
+            document.getElementById('time').textContent = new Date().toLocaleString('zh-CN');
         }
         updateTime();
         setInterval(updateTime, 1000);
