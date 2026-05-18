@@ -29,6 +29,7 @@ struct Connection {
     std::string client_ip;//客户端ip
     uint16_t client_port = 0;//客户端口
 
+    std::optional<HttpRequest> current_request;
     explicit Connection(tcp::socket&& sock)
         : socket(std::move(sock))
         , last_activity(std::chrono::steady_clock::now()) {
