@@ -208,12 +208,12 @@ void WebServer::startRead(std::shared_ptr<Connection> conn)
 	);
 }
 
-void WebServer::handleRead(std::shared_ptr<Connection> conn, const boost::system::error_code& error, size_t bytes_transferred)
-{
+void WebServer::handleRead(std::shared_ptr<Connection> conn,
+	const boost::system::error_code& error,
+	size_t bytes_transferred) {
 	if (!running_) return;
 
 	if (error) {
-		// 正常关闭连接（EOF）或客户端重置连接
 		if (error == asio::error::eof) {
 			LOG_DEBUG("客户端正常关闭连接");
 		}
@@ -227,16 +227,12 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn, const boost::system
 		return;
 	}
 
-	// ========== 处理接收到的数据 ==========
-	// commit() 确认数据已写入缓冲区
 	conn->read_buffer.commit(bytes_transferred);
 	conn->last_activity = std::chrono::steady_clock::now();
 
-	// 更新监控数据
 	auto& monitor = ServerMonitor::getInstance();
 	monitor.addBytesReceived(bytes_transferred);
 
-	// 获取可读数据的指针和大小
 	const char* data = asio::buffer_cast<const char*>(conn->read_buffer.data());
 	size_t available = conn->read_buffer.size();
 
@@ -244,22 +240,18 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn, const boost::system
 	auto request_opt = conn->parser.parse(data, available);
 
 	if (request_opt) {
-		// 解析成功！记录请求信息
-		auto& request = *request_opt;
-
-		// 检查是否保持连接
-		conn->keep_alive = request.keep_alive;
+		// ========== 关键改动：保存解析结果 ==========
+		conn->current_request = std::move(request_opt);
 
 		// 消耗已解析的数据
 		conn->read_buffer.consume(available);
 
 		LOG_DEBUG("收到请求: {} {}",
-			request.method == HttpMethod::GET ? "GET" :
-			request.method == HttpMethod::HEAD ? "HEAD" : "UNKNOWN",
-			request.path);
+			conn->current_request->method == HttpMethod::GET ? "GET" :
+			conn->current_request->method == HttpMethod::HEAD ? "HEAD" : "UNKNOWN",
+			conn->current_request->path);
 
-		// ========== 在线程池中处理请求 ==========
-		// 使用 shared_ptr 保证连接对象在处理期间不被释放
+		// 在线程池中处理请求
 		thread_pool_->enqueue([this, conn]() {
 			processRequest(conn);
 			});
@@ -305,74 +297,193 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 	auto& monitor = ServerMonitor::getInstance();
 	monitor.incrementRequests();
 
-	// ========== 重新解析完整请求（简化版） ==========
-	// 实际项目中应该在 handleRead 中传递解析好的对象
-	auto& parser = conn->parser;
-
-	// 简化：假设请求在缓冲区中（需要从 Connection 获取）
-	// 这里为了演示，直接使用默认值
-	std::string path = "/index.html";
-
-	// ========== 安全检查：防止目录遍历攻击 ==========
-	if (path.find("..") != std::string::npos ||
-		path.find("//") != std::string::npos ||
-		path.find("\\") != std::string::npos) {
-		LOG_WARNING("检测到可疑路径访问: {}", path);
-		sendErrorResponse(conn, 403);  // Forbidden
+	//获取解析好的请求对象
+	if (!conn->current_request.has_value()) {
+		LOG_ERROR("请求对象为空，无法处理");
+		sendErrorResponse(conn, 500);
 		return;
 	}
 
-	// 根路径重定向到 index.html
+	// 获取请求引用（方便使用）
+	const auto& request = conn->current_request.value();
+
+	// 检查请求方法
+
+	if (request.method == HttpMethod::UNSUPPORTED) {
+		LOG_WARNING("不支持的方法");
+		sendErrorResponse(conn, 405);  // Method Not Allowed
+		return;
+	}
+
+	// 获取并安全检查请求路径
+	std::string path = request.path;
+
+	LOG_DEBUG("处理请求: {} {}",
+		(request.method == HttpMethod::GET ? "GET" : "HEAD"),
+		path);
+
+
+
+	if (path.find("..") != std::string::npos ||      // 目录回溯
+		path.find("//") != std::string::npos ||       // 双斜杠
+		path.find("\\") != std::string::npos ||       // Windows反斜杠
+		path.find('\0') != std::string::npos ||       // 空字节截断
+		path.find("%2e%2e") != std::string::npos ||   // URL编码的 ..
+		path.find("%2f") != std::string::npos) {      // URL编码的 /
+		LOG_WARNING("检测到可疑路径访问: {}", path);
+		sendErrorResponse(conn, 403);
+		return;
+	}
+
 	if (path == "/") {
 		path = "/index.html";
 	}
 
-	// ========== 构建文件系统路径 ==========
-	std::string file_path = static_dir_ + path;
 
-	// ========== 检查文件是否存在 ==========
-	if (!fs::exists(file_path)) {
-		LOG_DEBUG("文件不存在: {}", file_path);
-		sendErrorResponse(conn, 404);  // Not Found
-		return;
+	size_t query_pos = path.find('?');
+	if (query_pos != std::string::npos) {
+		path = path.substr(0, query_pos);
+		LOG_DEBUG("移除查询字符串，实际路径: {}", path);
 	}
 
-	// 确保是普通文件（不是目录）
-	if (!fs::is_regular_file(file_path)) {
-		LOG_DEBUG("路径不是文件: {}", file_path);
+
+	if (!path.empty() && path.back() == '/') {
+		path += "index.html";  // 目录访问默认返回 index.html
+	}
+
+
+	std::string file_path = static_dir_ + path;
+
+	LOG_DEBUG("文件路径: {}", file_path);
+
+
+
+	//  检查是否存在 
+	if (!fs::exists(file_path)) {
+		LOG_DEBUG("文件不存在: {}", file_path);
 		sendErrorResponse(conn, 404);
 		return;
 	}
 
-	// ========== 读取文件内容 ==========
-	std::string content = readFile(file_path);
-	if (content.empty()) {
-		LOG_ERROR("读取文件失败: {}", file_path);
-		sendErrorResponse(conn, 500);  // Internal Server Error
+	//  确保是普通文件 
+	if (!fs::is_regular_file(file_path)) {
+		LOG_DEBUG("路径不是文件，可能是目录: {}", file_path);
+		sendErrorResponse(conn, 404);  
 		return;
 	}
 
-	// ========== 获取 MIME 类型 ==========
+	//检查文件是否可读
+	std::error_code ec;
+	auto perms = fs::status(file_path, ec).permissions();
+	if (ec) {
+		LOG_ERROR("无法获取文件权限: {}", ec.message());
+		sendErrorResponse(conn, 500);
+		return;
+	}
+
+	// 检查所有者读权限（简化处理）
+	if ((perms & fs::perms::owner_read) == fs::perms::none) {
+		LOG_WARNING("文件不可读: {}", file_path);
+		sendErrorResponse(conn, 403);
+		return;
+	}
+
+
+	//处理缓存相关头部（If-Modified-Since）
+
+
+	auto it = request.headers.find("If-Modified-Since");
+	if (it != request.headers.end()) {
+		LOG_DEBUG("客户端要求检查修改时间: {}", it->second);
+
+		// 获取文件最后修改时间
+		auto file_time = fs::last_write_time(file_path, ec);
+		if (!ec) {
+			// 将文件时间转换为 HTTP 时间格式
+			auto ftime = std::chrono::system_clock::to_time_t(
+				std::chrono::clock_cast<std::chrono::system_clock>(file_time));
+
+		}
+	}
+
+
+	// 处理 HEAD 请求
+
+
+	bool is_head = (request.method == HttpMethod::HEAD);
+
+	//读取文件内容
+
+	std::string content;
+	if (!is_head) {
+		// GET 请求：读取完整文件内容
+		content = readFile(file_path);
+		if (content.empty() && fs::file_size(file_path) > 0) {
+			// 文件不为空但读取失败
+			LOG_ERROR("读取文件失败: {}", file_path);
+			sendErrorResponse(conn, 500);
+			return;
+		}
+	}
+	// HEAD 请求：content 保持为空字符串
+
+	//获取 MIME 类型
+	
 	std::string mime_type = getMimeType(file_path);
 
-	LOG_DEBUG("响应: {} ({} bytes, type: {})",
-		file_path, content.size(), mime_type);
+	//根据 Accept 头部调整响应
+	
+	auto accept_it = request.headers.find("Accept");
+	if (accept_it != request.headers.end()) {
+		LOG_DEBUG("客户端接受类型: {}", accept_it->second);
 
-	// ========== 构建 HTTP 响应 ==========
+	}
+
+	//记录日志
+
+	LOG_DEBUG("响应: {} {} -> {} ({} bytes, type: {})",
+		request.method == HttpMethod::GET ? "GET" : "HEAD",
+		request.path,
+		file_path,
+		content.size(),
+		mime_type);
+
+	//构建并发送 HTTP 响应
+
+	std::string status = "200 OK";
+
 	std::string response = buildHttpResponse(
-		"200 OK",      // 状态行
-		mime_type,      // Content-Type
-		content,        // 响应体
-		conn->keep_alive  // 是否保持连接
+		status,
+		mime_type,
+		content,               // HEAD 请求时为空字符串
+		conn->keep_alive        // 从请求中解析的 Keep-Alive 标志
 	);
 
-	// ========== 发送响应 ==========
+
+
+
 	sendResponse(conn, response);
 
-	// ========== 更新统计 ==========
+	//更新统计信息
+
 	conn->requests_handled++;
-	monitor.updateConnectionRequest(0, path);  // TODO: 传入正确的 fd
+
+	// 找到正确的连接 ID（从 Monitor 中查找）
+	{
+		std::lock_guard<std::mutex> lock(connections_mutex_);
+		for (const auto& [fd, c] : connections_) {
+			if (c == conn) {
+				monitor.updateConnectionRequest(fd, request.path);
+				break;
+			}
+		}
+	}
+
 	monitor.addBytesSent(response.size());
+
+	//清理当前请求（准备处理下一个请求）
+
+	conn->current_request.reset();
 }
 
 void WebServer::sendResponse(std::shared_ptr<Connection> conn, const std::string& response)
