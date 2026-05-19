@@ -214,13 +214,7 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn,
 	if (!running_) return;
 
 	if (error) {
-		if (error == asio::error::eof) {
-			LOG_DEBUG("客户端正常关闭连接");
-		}
-		else if (error == asio::error::connection_reset) {
-			LOG_DEBUG("客户端重置连接");
-		}
-		else if (error != asio::error::operation_aborted) {
+		if (error != asio::error::eof && error != asio::error::connection_reset) {
 			LOG_ERROR("读取错误: {}", error.message());
 		}
 		cleanupConnection(conn);
@@ -230,39 +224,41 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn,
 	conn->read_buffer.commit(bytes_transferred);
 	conn->last_activity = std::chrono::steady_clock::now();
 
-	auto& monitor = ServerMonitor::getInstance();
-	monitor.addBytesReceived(bytes_transferred);
+	// ========== 改用 istream 读取 ==========
+	std::istream is(&conn->read_buffer);
+	std::string http_data;
 
-	const char* data = asio::buffer_cast<const char*>(conn->read_buffer.data());
-	size_t available = conn->read_buffer.size();
+	// 读取直到遇到 \r\n\r\n（HTTP头部结束标志）
+	std::string line;
+	while (std::getline(is, line)) {
+		http_data += line + "\n";
+		if (line.empty() || line == "\r") {
+			break;  // 空行 = 头部结束
+		}
+	}
 
-	// ========== 尝试解析 HTTP 请求 ==========
-	auto request_opt = conn->parser.parse(data, available);
+	LOG_DEBUG("收到的HTTP数据:\n{}", http_data);
+
+	// 用 stringstream 模拟原始数据给 parser
+	std::string raw = http_data;
+	auto request_opt = conn->parser.parse(raw.c_str(), raw.size());
 
 	if (request_opt) {
-		// ========== 关键改动：保存解析结果 ==========
 		conn->current_request = std::move(request_opt);
 
-		// 消耗已解析的数据
-		conn->read_buffer.consume(available);
-
-		LOG_DEBUG("收到请求: {} {}",
-			conn->current_request->method == HttpMethod::GET ? "GET" :
-			conn->current_request->method == HttpMethod::HEAD ? "HEAD" : "UNKNOWN",
+		LOG_INFO("解析成功: {} {}",
+			conn->current_request->method == HttpMethod::GET ? "GET" : "HEAD",
 			conn->current_request->path);
 
-		// 在线程池中处理请求
 		thread_pool_->enqueue([this, conn]() {
 			processRequest(conn);
 			});
-
 	}
 	else {
-		// 数据不完整，继续读取
+		LOG_DEBUG("解析失败，继续等待");
 		startRead(conn);
 	}
 }
-
 void WebServer::handleWrite(std::shared_ptr<Connection> conn, const boost::system::error_code& error, size_t bytes_transferred)
 {
 	if (error) {
