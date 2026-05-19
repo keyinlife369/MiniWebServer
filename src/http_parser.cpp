@@ -15,59 +15,62 @@ void HttpParser::reset() {
 	body_read_ = 0;//已读请求体数据长度初始化为0
 }
 std::optional<HttpRequest> HttpParser::parse(const char* data, size_t len) {
-	buffer_.append(data, len);//把接收到的数据存入缓冲区末尾
+    buffer_.append(data, len);
 
-	while (true) {
-		if (state_ == ParseState::BODY) {
-			//缓冲区数据大于需要读取的请求体总长
-			if (buffer_.size() >= content_length_) {
-				//截取对应长度的数据做请求体
-				current_request_.body = buffer_.substr(0, content_length_);
-				buffer_.erase(0, content_length_);//从缓冲区删除已经解析的数据
-				state_ = ParseState::COMPLETE;
-				
-				auto request = std::move(current_request_);//转移所有权
-				reset();//解析完成，重置，解析下一个请求
-				return request;
-			}
-			return std::nullopt;
-		}
-		//在缓冲区查找分隔符回车和换行
-		auto pos = buffer_.find("\r\n");
-		if (pos == std::string::npos) {
-			return std::nullopt;//找不到返回空（数据不完整）
-		}
+    while (true) {
+        if (state_ == ParseState::BODY) {
+            if (buffer_.size() >= content_length_) {
+                current_request_.body = buffer_.substr(0, content_length_);
+                buffer_.erase(0, content_length_);
+                state_ = ParseState::COMPLETE;
 
-		//提取一行数据并从缓冲区删除
-		std::string line = buffer_.substr(0, pos);//截取一行内容
-		buffer_.erase(0, pos + 2);//删除这一行+换行符
+                auto request = std::move(current_request_);
+                reset();
+                return request;
+            }
+            return std::nullopt;
+        }
 
-		//读到空行且但前状态是解析请求头
-		if (line.empty() && state_ == ParseState::HEADER_VALUE) {
-			//查找请求头中的Content-Length
-			auto it = current_request_.headers.find("Content-Length");
+        // 查找行结束符
+        auto pos = buffer_.find("\r\n");
+        if (pos == std::string::npos) {
+            return std::nullopt;
+        }
 
-			if (it != current_request_.headers.end()) {
-				content_length_ = std::stoul(it->second);//读取请求体的长度切换状态为解析BODY
-				state_ = ParseState::BODY;
-			}
-			else {
-				//没有请求体直接标记解析完成
-				state_ = ParseState::COMPLETE;
-				auto request=std::move(current_request_);
-				reset();
-				return request;
-			}
-			continue;//继续循环，处理请求体
-		}
-		parseLine(line);//解析单行数据
+        std::string line = buffer_.substr(0, pos);
+        buffer_.erase(0, pos + 2);
 
-		if (state_ == ParseState::ERROR_) {
-			reset();//出错重置解析
-			return std::nullopt;
-		}
-	}
+        // ========== 关键修改 ==========
+        if (line.empty()) {
+            // 遇到空行 = 头部结束
+            if (state_ == ParseState::HEADER_KEY || state_ == ParseState::HEADER_VALUE) {
+                // 检查是否有 Content-Length
+                auto it = current_request_.headers.find("Content-Length");
+                if (it != current_request_.headers.end()) {
+                    content_length_ = std::stoul(it->second);
+                    state_ = ParseState::BODY;
+                    continue;  // 继续循环读取 body
+                }
+                else {
+                    // GET 请求：没有 body，直接完成
+                    state_ = ParseState::COMPLETE;
+                    auto request = std::move(current_request_);
+                    reset();
+                    return request;  // 直接返回！
+                }
+            }
+        }
+        // ============================
+
+        parseLine(line);
+
+        if (state_ == ParseState::ERROR_) {
+            reset();
+            return std::nullopt;
+        }
+    }
 }
+
 
 void HttpParser::parseLine(const std::string& line) {
 	switch (state_) {//根据解析状态，执行不同的逻辑
