@@ -236,6 +236,12 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn,
 	const boost::system::error_code& error,
 	size_t bytes_transferred) {
 
+<<<<<<< HEAD
+=======
+void WebServer::handleRead(std::shared_ptr<Connection> conn,
+	const boost::system::error_code& error,
+	size_t bytes_transferred) {
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	if (!running_) return;
 
 	if (error) {
@@ -246,6 +252,7 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn,
 		return;
 	}
 
+<<<<<<< HEAD
 	// 确认数据已写入 Asio 缓冲区
 	conn->read_buffer.commit(bytes_transferred);
 	conn->last_activity = std::chrono::steady_clock::now();
@@ -263,6 +270,29 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn,
 
 	// 将原始数据传给解析器
 	auto request_opt = conn->parser.parse(data, available);
+=======
+	conn->read_buffer.commit(bytes_transferred);
+	conn->last_activity = std::chrono::steady_clock::now();
+
+	// ========== 改用 istream 读取 ==========
+	std::istream is(&conn->read_buffer);
+	std::string http_data;
+
+	// 读取直到遇到 \r\n\r\n（HTTP头部结束标志）
+	std::string line;
+	while (std::getline(is, line)) {
+		http_data += line + "\n";
+		if (line.empty() || line == "\r") {
+			break;  // 空行 = 头部结束
+		}
+	}
+
+	LOG_DEBUG("收到的HTTP数据:\n{}", http_data);
+
+	// 用 stringstream 模拟原始数据给 parser
+	std::string raw = http_data;
+	auto request_opt = conn->parser.parse(raw.c_str(), raw.size());
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 
 	// 计算本次解析消耗的字节数
 	size_t consumed_after = conn->parser.getBytesConsumed();
@@ -274,6 +304,7 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn,
 	}
 
 	if (request_opt) {
+<<<<<<< HEAD
 		// 解析成功，保存请求对象
 		conn->current_request = std::move(request_opt);
 		conn->keep_alive = conn->current_request->keep_alive;
@@ -292,13 +323,23 @@ void WebServer::handleRead(std::shared_ptr<Connection> conn,
 		thread_pool_->enqueue([this, conn]() {
 			processRequest(conn);
 		});
+=======
+		conn->current_request = std::move(request_opt);
+
+		LOG_INFO("解析成功: {} {}",
+			conn->current_request->method == HttpMethod::GET ? "GET" : "HEAD",
+			conn->current_request->path);
+
+		thread_pool_->enqueue([this, conn]() {
+			processRequest(conn);
+			});
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	}
 	else {
-		// 数据不完整，继续读取
+		LOG_DEBUG("解析失败，继续等待");
 		startRead(conn);
 	}
 }
-
 void WebServer::handleWrite(std::shared_ptr<Connection> conn, const boost::system::error_code& error, size_t bytes_transferred)
 {
 	if (error) {
@@ -343,6 +384,7 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 	const auto& request = conn->current_request.value();
 
 	// 检查请求方法
+<<<<<<< HEAD
 	if (request.method == HttpMethod::UNSUPPORTED) {
 		LOG_WARNING("不支持的方法: {}", request.path);
 		sendErrorResponse(conn, 405, "\r\nAllow: GET, HEAD, POST");
@@ -426,6 +468,30 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 		path.find('\0') != std::string::npos ||
 		path.find("%2e%2e") != std::string::npos ||
 		path.find("%2f") != std::string::npos) {
+=======
+
+	if (request.method == HttpMethod::UNSUPPORTED) {
+		LOG_WARNING("不支持的方法");
+		sendErrorResponse(conn, 405);  // Method Not Allowed
+		return;
+	}
+
+	// 获取并安全检查请求路径
+	std::string path = request.path;
+
+	LOG_DEBUG("处理请求: {} {}",
+		(request.method == HttpMethod::GET ? "GET" : "HEAD"),
+		path);
+
+
+
+	if (path.find("..") != std::string::npos ||      // 目录回溯
+		path.find("//") != std::string::npos ||       // 双斜杠
+		path.find("\\") != std::string::npos ||       // Windows反斜杠
+		path.find('\0') != std::string::npos ||       // 空字节截断
+		path.find("%2e%2e") != std::string::npos ||   // URL编码的 ..
+		path.find("%2f") != std::string::npos) {      // URL编码的 /
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 		LOG_WARNING("检测到可疑路径访问: {}", path);
 		sendErrorResponse(conn, 403);
 		return;
@@ -435,26 +501,59 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 		path = "/index.html";
 	}
 
+<<<<<<< HEAD
 	if (!path.empty() && path.back() == '/') {
 		path += "index.html";
 	}
 
+=======
+
+	size_t query_pos = path.find('?');
+	if (query_pos != std::string::npos) {
+		path = path.substr(0, query_pos);
+		LOG_DEBUG("移除查询字符串，实际路径: {}", path);
+	}
+
+
+	if (!path.empty() && path.back() == '/') {
+		path += "index.html";  // 目录访问默认返回 index.html
+	}
+
+
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	std::string file_path = static_dir_ + path;
 
 	LOG_DEBUG("文件路径: {}", file_path);
 
+<<<<<<< HEAD
+=======
+
+
+	//  检查是否存在 
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	if (!fs::exists(file_path)) {
 		LOG_DEBUG("文件不存在: {}", file_path);
 		sendErrorResponse(conn, 404);
 		return;
 	}
 
+<<<<<<< HEAD
 	if (!fs::is_regular_file(file_path)) {
 		LOG_DEBUG("路径不是文件，可能是目录: {}", file_path);
 		sendErrorResponse(conn, 404);
 		return;
 	}
 
+=======
+	//  确保是普通文件 
+	if (!fs::is_regular_file(file_path)) {
+		LOG_DEBUG("路径不是文件，可能是目录: {}", file_path);
+		sendErrorResponse(conn, 404);  
+		return;
+	}
+
+	//检查文件是否可读
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	std::error_code ec;
 	auto perms = fs::status(file_path, ec).permissions();
 	if (ec) {
@@ -462,12 +561,18 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 		sendErrorResponse(conn, 500);
 		return;
 	}
+<<<<<<< HEAD
+=======
+
+	// 检查所有者读权限（简化处理）
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	if ((perms & fs::perms::owner_read) == fs::perms::none) {
 		LOG_WARNING("文件不可读: {}", file_path);
 		sendErrorResponse(conn, 403);
 		return;
 	}
 
+<<<<<<< HEAD
 	auto it = request.headers.find("If-Modified-Since");
 	if (it != request.headers.end()) {
 		LOG_DEBUG("客户端要求检查修改时间: {}", it->second);
@@ -484,11 +589,46 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 	if (!is_head) {
 		content = readFile(file_path);
 		if (content.empty() && fs::file_size(file_path) > 0) {
+=======
+
+	//处理缓存相关头部（If-Modified-Since）
+
+
+	auto it = request.headers.find("If-Modified-Since");
+	if (it != request.headers.end()) {
+		LOG_DEBUG("客户端要求检查修改时间: {}", it->second);
+
+		// 获取文件最后修改时间
+		auto file_time = fs::last_write_time(file_path, ec);
+		if (!ec) {
+			// 将文件时间转换为 HTTP 时间格式
+			auto ftime = std::chrono::system_clock::to_time_t(
+				std::chrono::clock_cast<std::chrono::system_clock>(file_time));
+
+		}
+	}
+
+
+	// 处理 HEAD 请求
+
+
+	bool is_head = (request.method == HttpMethod::HEAD);
+
+	//读取文件内容
+
+	std::string content;
+	if (!is_head) {
+		// GET 请求：读取完整文件内容
+		content = readFile(file_path);
+		if (content.empty() && fs::file_size(file_path) > 0) {
+			// 文件不为空但读取失败
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 			LOG_ERROR("读取文件失败: {}", file_path);
 			sendErrorResponse(conn, 500);
 			return;
 		}
 	}
+<<<<<<< HEAD
 
 	std::string mime_type = getMimeType(file_path);
 
@@ -507,6 +647,52 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 
 	conn->requests_handled++;
 
+=======
+	// HEAD 请求：content 保持为空字符串
+
+	//获取 MIME 类型
+	
+	std::string mime_type = getMimeType(file_path);
+
+	//根据 Accept 头部调整响应
+	
+	auto accept_it = request.headers.find("Accept");
+	if (accept_it != request.headers.end()) {
+		LOG_DEBUG("客户端接受类型: {}", accept_it->second);
+
+	}
+
+	//记录日志
+
+	LOG_DEBUG("响应: {} {} -> {} ({} bytes, type: {})",
+		request.method == HttpMethod::GET ? "GET" : "HEAD",
+		request.path,
+		file_path,
+		content.size(),
+		mime_type);
+
+	//构建并发送 HTTP 响应
+
+	std::string status = "200 OK";
+
+	std::string response = buildHttpResponse(
+		status,
+		mime_type,
+		content,               // HEAD 请求时为空字符串
+		conn->keep_alive        // 从请求中解析的 Keep-Alive 标志
+	);
+
+
+
+
+	sendResponse(conn, response);
+
+	//更新统计信息
+
+	conn->requests_handled++;
+
+	// 找到正确的连接 ID（从 Monitor 中查找）
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	{
 		std::lock_guard<std::mutex> lock(connections_mutex_);
 		for (const auto& [fd, c] : connections_) {
@@ -519,6 +705,11 @@ void WebServer::processRequest(std::shared_ptr<Connection> conn)
 
 	monitor.addBytesSent(response.size());
 
+<<<<<<< HEAD
+=======
+	//清理当前请求（准备处理下一个请求）
+
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 	conn->current_request.reset();
 }
 

@@ -19,6 +19,7 @@ void HttpParser::reset() {
 }
 
 std::optional<HttpRequest> HttpParser::parse(const char* data, size_t len) {
+<<<<<<< HEAD
 	// 将新数据追加到内部缓冲区
 	buffer_.append(data, len);
 
@@ -112,7 +113,64 @@ std::optional<HttpRequest> HttpParser::parse(const char* data, size_t len) {
 			return std::nullopt;
 		}
 	}
+=======
+    buffer_.append(data, len);
+
+    while (true) {
+        if (state_ == ParseState::BODY) {
+            if (buffer_.size() >= content_length_) {
+                current_request_.body = buffer_.substr(0, content_length_);
+                buffer_.erase(0, content_length_);
+                state_ = ParseState::COMPLETE;
+
+                auto request = std::move(current_request_);
+                reset();
+                return request;
+            }
+            return std::nullopt;
+        }
+
+        // 查找行结束符
+        auto pos = buffer_.find("\r\n");
+        if (pos == std::string::npos) {
+            return std::nullopt;
+        }
+
+        std::string line = buffer_.substr(0, pos);
+        buffer_.erase(0, pos + 2);
+
+        // ========== 关键修改 ==========
+        if (line.empty()) {
+            // 遇到空行 = 头部结束
+            if (state_ == ParseState::HEADER_KEY || state_ == ParseState::HEADER_VALUE) {
+                // 检查是否有 Content-Length
+                auto it = current_request_.headers.find("Content-Length");
+                if (it != current_request_.headers.end()) {
+                    content_length_ = std::stoul(it->second);
+                    state_ = ParseState::BODY;
+                    continue;  // 继续循环读取 body
+                }
+                else {
+                    // GET 请求：没有 body，直接完成
+                    state_ = ParseState::COMPLETE;
+                    auto request = std::move(current_request_);
+                    reset();
+                    return request;  // 直接返回！
+                }
+            }
+        }
+        // ============================
+
+        parseLine(line);
+
+        if (state_ == ParseState::ERROR_) {
+            reset();
+            return std::nullopt;
+        }
+    }
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 }
+
 
 void HttpParser::parseLine(const std::string& line) {
 	switch (state_) {

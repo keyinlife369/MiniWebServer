@@ -33,6 +33,7 @@ struct Connection {
 	std::string client_ip;//客户端ip
 	uint16_t client_port = 0;//客户端口
 
+<<<<<<< HEAD
 	std::optional<HttpRequest> current_request;
 
 	explicit Connection(tcp::socket&& sock)
@@ -57,6 +58,13 @@ struct SslConnection : public Connection {
 	tcp::socket& getSocket() override {
 		return ssl_socket.next_layer();  // 返回 SSL 流底层 TCP socket
 	}
+=======
+    std::optional<HttpRequest> current_request;
+    explicit Connection(tcp::socket&& sock)
+        : socket(std::move(sock))
+        , last_activity(std::chrono::steady_clock::now()) {
+    }
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
 };
 
 class WebServer {
@@ -106,6 +114,7 @@ private:
 	void handleWrite(std::shared_ptr<Connection> conn, const boost::system::error_code& error,
 		size_t bytes_transferred);
 
+<<<<<<< HEAD
 	// SSL/HTTPS 处理
 	bool initSsl();
 	void startSslAccept();
@@ -138,3 +147,8 @@ private:
 	std::string getMimeType(const std::string& path);
 	std::string readFile(const std::string& path);
 };
+=======
+    std::string getMimeType(const std::string& path);
+    std::string readFile(const std::string& path);
+};
+>>>>>>> 32048d3d8b9434b5d7a473674304be5258749510
