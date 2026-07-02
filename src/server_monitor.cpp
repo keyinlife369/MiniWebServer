@@ -70,6 +70,7 @@ void ServerMonitor::addConnection(int fd, const std::string& ip, uint16_t port) 
     connections_[fd] = info;
     emit connectionAdded(fd);
 }
+
 void ServerMonitor::removeConnection(int fd) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     connections_.erase(fd);
@@ -146,10 +147,15 @@ void ServerMonitor::setRunning(bool running) {
         emit serverStopped();
     }
 }
+
+
 bool ServerMonitor::isRunning() const { return running_.load(); }
+
 void ServerMonitor::setPort(int port) { port_ = port; }
 int ServerMonitor::getPort() const { return port_; }
+
 void ServerMonitor::setStaticDir(const std::string& dir) { static_dir_ = dir; }
 std::string ServerMonitor::getStaticDir() const { return static_dir_; }
+
 void ServerMonitor::setThreadCount(int count) { thread_count_ = count; }
 int ServerMonitor::getThreadCount() const { return thread_count_; }

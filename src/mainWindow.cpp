@@ -1,6 +1,9 @@
 ﻿#include"mainWindow.h"
 #include"server_monitor.h"
 #include"logger.h"
+#include"form_parser.h"
+#include"router.h"
+#include"mysql_wrapper.h"
 
 #include<QVBoxLayout>
 #include<QHBoxLayout>
@@ -466,8 +469,218 @@ void MainWindow::startServer()
         appendLog("已创建静态文件目录: " + QString::fromStdString(static_dir), "#a6e3a1");
     }
 
-    // 创建服务器实例
-    server_ = std::make_unique<WebServer>(port, static_dir, threads);
+    // 创建服务器实例（HTTP + HTTPS 双端口）
+    server_ = std::make_unique<WebServer>(port, static_dir, threads,
+        8443,                           // SSL 端口
+        "certs/server.crt",             // 证书文件
+        "certs/server.key");            // 私钥文件
+
+    // ========== 初始化 MySQL 连接池 ==========
+    MysqlPool::Config db_config;
+    db_config.host = "127.0.0.1";
+    db_config.port = 3306;
+    db_config.user = "root";
+    db_config.password = "710978";
+    db_config.database = "miniwebserver";
+    db_config.pool_size = 8;
+
+    auto db_pool = std::make_shared<MysqlPool>(db_config);
+
+    {
+        auto conn = db_pool->acquire();
+        conn->execute("CREATE DATABASE IF NOT EXISTS miniwebserver "
+                      "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        conn->execute("USE miniwebserver");
+        conn->execute(R"(
+            CREATE TABLE IF NOT EXISTS messages (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                author VARCHAR(100) NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        )");
+    }
+    appendLog("MySQL 数据库已就绪: miniwebserver.messages", "#a6e3a1");
+
+    // ========== 注册 Demo 路由 ==========
+    auto& router = server_->router();
+
+    // GET /api/info — 返回服务器实时状态
+    router.addRoute(HttpMethod::GET, "/api/info",
+        [](const HttpRequest& req) -> HttpResponse {
+            auto stats = ServerMonitor::getInstance().getStats();
+            auto uptime_secs = std::chrono::duration_cast<std::chrono::seconds>(
+                stats.uptime).count();
+
+            std::stringstream json;
+            json << "{\n";
+            json << "  \"server\": \"MiniWebServer/1.0\",\n";
+            json << "  \"uptime_seconds\": " << uptime_secs << ",\n";
+            json << "  \"active_connections\": " << stats.active_connections << ",\n";
+            json << "  \"total_connections\": " << stats.total_connections << ",\n";
+            json << "  \"total_requests\": " << stats.total_requests << ",\n";
+            json << "  \"requests_per_second\": " << stats.requests_per_second << ",\n";
+            json << "  \"bytes_received\": " << stats.bytes_received << ",\n";
+            json << "  \"bytes_sent\": " << stats.bytes_sent << "\n";
+            json << "}";
+            return HttpResponse::ok(json.str());
+        });
+
+    // POST /api/echo — 回显请求数据
+    router.addRoute(HttpMethod::POST, "/api/echo",
+        [](const HttpRequest& req) -> HttpResponse {
+            std::stringstream json;
+            json << "{\n";
+            json << "  \"method\": \"POST\",\n";
+            json << "  \"path\": \"" << req.path << "\",\n";
+
+            auto ct_it = req.headers.find("Content-Type");
+            std::string content_type = (ct_it != req.headers.end()) ? ct_it->second : "none";
+            json << "  \"content_type\": \"" << content_type << "\",\n";
+            json << "  \"body_length\": " << req.body.size() << ",\n";
+
+            if (content_type.find("application/x-www-form-urlencoded") != std::string::npos) {
+                auto form = parseUrlEncoded(req.body);
+                json << "  \"form_data\": {\n";
+                bool first = true;
+                for (const auto& [key, value] : form) {
+                    if (!first) json << ",\n";
+                    json << "    \"" << key << "\": \"" << value << "\"";
+                    first = false;
+                }
+                json << "\n  },\n";
+            }
+
+            json << "  \"raw_body\": \"" << req.body << "\"\n";
+            json << "}";
+            return HttpResponse::ok(json.str());
+        });
+
+    // ========== 留言板 CRUD 路由 ==========
+
+    // POST /api/messages — 创建留言
+    router.addRoute(HttpMethod::POST, "/api/messages",
+        [db_pool](const HttpRequest& req) -> HttpResponse {
+            // 解析 JSON body: {"author":"...", "content":"..."}
+            std::string author, content;
+
+            // 简单 JSON 解析（提取 "author" 和 "content" 字段）
+            auto extractJsonStr = [](const std::string& json, const std::string& key) -> std::string {
+                std::string search = "\"" + key + "\"";
+                size_t key_pos = json.find(search);
+                if (key_pos == std::string::npos) return "";
+                size_t val_start = json.find("\"", key_pos + search.size());
+                if (val_start == std::string::npos) return "";
+                size_t val_end = json.find("\"", val_start + 1);
+                if (val_end == std::string::npos) return "";
+                return json.substr(val_start + 1, val_end - val_start - 1);
+            };
+
+            author = extractJsonStr(req.body, "author");
+            content = extractJsonStr(req.body, "content");
+
+            if (author.empty() || content.empty()) {
+                return HttpResponse::badRequest("Missing 'author' or 'content' field");
+            }
+
+            try {
+                auto conn = db_pool->acquire();
+                std::string sql = "INSERT INTO messages (author, content) VALUES ('"
+                    + conn->escape(author) + "', '" + conn->escape(content) + "')";
+                if (!conn->execute(sql)) {
+                    return HttpResponse::serverError("Database insert failed");
+                }
+                uint64_t id = conn->lastInsertId();
+
+                std::stringstream json;
+                json << "{\"id\":" << id << ",\"message\":\"创建成功\"}";
+                return HttpResponse::created(json.str());
+            } catch (const std::exception& e) {
+                return HttpResponse::serverError(e.what());
+            }
+        });
+
+    // GET /api/messages — 获取所有留言
+    router.addRoute(HttpMethod::GET, "/api/messages",
+        [db_pool](const HttpRequest& req) -> HttpResponse {
+            try {
+                auto conn = db_pool->acquire();
+                auto rows = conn->query(
+                    "SELECT id, author, content, created_at FROM messages ORDER BY id DESC LIMIT 100");
+
+                std::stringstream json;
+                json << "[";
+                for (size_t i = 0; i < rows.size(); ++i) {
+                    if (i > 0) json << ",";
+                    json << "\n  {";
+                    json << "\"id\":" << rows[i].at("id") << ",";
+                    json << "\"author\":\"" << rows[i].at("author") << "\",";
+                    json << "\"content\":\"" << rows[i].at("content") << "\",";
+                    json << "\"created_at\":\"" << rows[i].at("created_at") << "\"";
+                    json << "}";
+                }
+                json << "\n]";
+                return HttpResponse::ok(json.str());
+            } catch (const std::exception& e) {
+                return HttpResponse::serverError(e.what());
+            }
+        });
+
+    // GET /api/message/:id — 获取单条留言
+    router.addRoute(HttpMethod::GET, "/api/message/:id",
+        [db_pool](const HttpRequest& req) -> HttpResponse {
+            auto it = req.route_params.find("id");
+            if (it == req.route_params.end()) {
+                return HttpResponse::badRequest("Missing id parameter");
+            }
+
+            try {
+                auto conn = db_pool->acquire();
+                std::string sql = "SELECT id, author, content, created_at FROM messages WHERE id="
+                    + conn->escape(it->second);
+                auto rows = conn->query(sql);
+
+                if (rows.empty()) {
+                    return HttpResponse::notFound("Message not found");
+                }
+
+                const auto& row = rows[0];
+                std::stringstream json;
+                json << "{";
+                json << "\"id\":" << row.at("id") << ",";
+                json << "\"author\":\"" << row.at("author") << "\",";
+                json << "\"content\":\"" << row.at("content") << "\",";
+                json << "\"created_at\":\"" << row.at("created_at") << "\"";
+                json << "}";
+                return HttpResponse::ok(json.str());
+            } catch (const std::exception& e) {
+                return HttpResponse::serverError(e.what());
+            }
+        });
+
+    // DELETE /api/message/:id — 删除留言
+    router.addRoute(HttpMethod::DELETE_, "/api/message/:id",
+        [db_pool](const HttpRequest& req) -> HttpResponse {
+            auto it = req.route_params.find("id");
+            if (it == req.route_params.end()) {
+                return HttpResponse::badRequest("Missing id parameter");
+            }
+
+            try {
+                auto conn = db_pool->acquire();
+                std::string sql = "DELETE FROM messages WHERE id=" + conn->escape(it->second);
+                if (!conn->execute(sql)) {
+                    return HttpResponse::serverError("Database delete failed");
+                }
+
+                return HttpResponse::ok("{\"message\":\"已删除\"}");
+            } catch (const std::exception& e) {
+                return HttpResponse::serverError(e.what());
+            }
+        });
+
+    appendLog("已注册 API 路由: GET /api/info, POST /api/echo", "#89b4fa");
+    appendLog("已注册 CRUD 路由: POST/GET /api/messages, GET/DELETE /api/message/:id", "#a6e3a1");
 
     // 启动服务器
     if (server_->startServer()) {

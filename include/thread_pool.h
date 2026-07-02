@@ -19,7 +19,7 @@ public:
 	auto enqueue(F&& f, Args&&... args) -> std::future<typename std::_Invoke_result_t<F, Args...>>;
 
 private:
-	std::vector<std::thread> workers_;//工作线程集合
+	std::vector<std::thread> workers_;//线程集合
 	std::queue<std::function<void()>> tasks_;//任务队列
 
 	std::mutex queue_mutex_;//任务队列互斥锁
@@ -35,13 +35,13 @@ inline ThreadPool::ThreadPool(size_t threads) {
 		workers_.emplace_back([this] {
 			//死循环线程启动后一直运行到线程池结束
 			while (true) {
-				std::function<void()> task; {
-
+				std::function<void()> task; 
+				{
 					//加锁独占访问任务队列，放置多线程同时修改队列
 					std::unique_lock<std::mutex> lock(queue_mutex_);
 					condition_.wait(lock, [this] {
 						return stop_ || !tasks_.empty();
-						});
+					});
 
 					//线程阻塞休眠
 					if (stop_ && tasks_.empty()) return;
@@ -66,13 +66,12 @@ inline ThreadPool::~ThreadPool() {
 	condition_.notify_all();
 
 	for (std::thread& worker : workers_) {
-		worker.join();
+		if(worker.joinable())worker.join();
 	}
 }
 
 
 template<class F, class... Args>//模板
-//
 auto ThreadPool::enqueue(F&& f, Args&&... args)
 -> std::future<typename std::invoke_result_t<F, Args...>> {
 

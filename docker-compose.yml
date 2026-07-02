@@ -1,0 +1,30 @@
+version: '3.8'
+
+# MiniWebServer 部署环境
+# 用法: docker-compose up -d mysql
+
+services:
+  # MySQL 9.5 数据库服务
+  mysql:
+    image: mysql:9.5
+    container_name: miniwebserver-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: We@710978
+      MYSQL_DATABASE: miniwebserver
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+    driver: local

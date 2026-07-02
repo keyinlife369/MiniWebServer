@@ -1,118 +1,184 @@
-﻿#include"http_parser.h"
-#include<sstream>
+#include"http_parser.h"
+#include"sstream"
 #include<algorithm>
+#include<iostream>
+#include"logger.h"
 
 HttpParser::HttpParser() {
 	reset();
 }
 
 void HttpParser::reset() {
-	state_ = ParseState::METHOD;//解析请求方法
-	current_request_ = HttpRequest{};//初始化Http请求对象
-	current_header_key_.clear();//清空临时key
-	buffer_.clear();//清空数据缓冲区
-	content_length_ = 0;//请求体长度初始化为0
-	body_read_ = 0;//已读请求体数据长度初始化为0
+	state_ = ParseState::METHOD;
+	current_request_ = HttpRequest{};
+	current_header_key_.clear();
+	buffer_.clear();
+	content_length_ = 0;
+	body_read_ = 0;
+	total_bytes_consumed_ = 0;
 }
+
 std::optional<HttpRequest> HttpParser::parse(const char* data, size_t len) {
-	buffer_.append(data, len);//把接收到的数据存入缓冲区末尾
+	// 将新数据追加到内部缓冲区
+	buffer_.append(data, len);
 
 	while (true) {
+		// ========== BODY 状态：支持分块到达 ==========
 		if (state_ == ParseState::BODY) {
-			//缓冲区数据大于需要读取的请求体总长
-			if (buffer_.size() >= content_length_) {
-				//截取对应长度的数据做请求体
-				current_request_.body = buffer_.substr(0, content_length_);
-				buffer_.erase(0, content_length_);//从缓冲区删除已经解析的数据
+			size_t needed = content_length_ - body_read_;
+			size_t available = buffer_.size();
+			size_t to_read = (std::min)(needed, available);
+
+			current_request_.body.append(buffer_.substr(0, to_read));
+			buffer_.erase(0, to_read);
+			total_bytes_consumed_ += to_read;
+			body_read_ += to_read;
+
+			if (body_read_ >= content_length_) {
 				state_ = ParseState::COMPLETE;
-				
-				auto request = std::move(current_request_);//转移所有权
-				reset();//解析完成，重置，解析下一个请求
-				return request;
+				// 继续执行下面的 COMPLETE 处理
+			} else {
+				// body 数据未完全到达，等待更多数据
+				return std::nullopt;
 			}
-			return std::nullopt;
 		}
-		//在缓冲区查找分隔符回车和换行
+
+		// ========== COMPLETE：软重置并返回请求 ==========
+		if (state_ == ParseState::COMPLETE) {
+			auto request = std::move(current_request_);
+
+			// 软重置：仅清空请求级状态，保留 buffer_（可能含流水线请求数据）
+			current_request_ = HttpRequest{};
+			current_header_key_.clear();
+			content_length_ = 0;
+			body_read_ = 0;
+			// 注意：total_bytes_consumed_ 和 buffer_ 不清零
+			// buffer_ 中可能已经有下一个请求的数据
+			state_ = ParseState::METHOD;
+
+			return request;
+		}
+
+		// ========== 非 BODY/COMPLETE 状态：按行解析 ==========
+		// 查找行结束符
 		auto pos = buffer_.find("\r\n");
 		if (pos == std::string::npos) {
-			return std::nullopt;//找不到返回空（数据不完整）
+			return std::nullopt;
 		}
 
-		//提取一行数据并从缓冲区删除
-		std::string line = buffer_.substr(0, pos);//截取一行内容
-		buffer_.erase(0, pos + 2);//删除这一行+换行符
+		std::string line = buffer_.substr(0, pos);
+		buffer_.erase(0, pos + 2);
+		total_bytes_consumed_ += (pos + 2);  // 追踪消费的字节数
 
-		//读到空行且但前状态是解析请求头
-		if (line.empty() && state_ == ParseState::HEADER_VALUE) {
-			//查找请求头中的Content-Length
-			auto it = current_request_.headers.find("Content-Length");
+		// 空行 = 头部结束
+		if (line.empty()) {
+			if (state_ == ParseState::HEADER_KEY || state_ == ParseState::HEADER_VALUE) {
+				// 检查是否有 Content-Length
+				auto it = current_request_.headers.find("Content-Length");
+				if (it != current_request_.headers.end()) {
+					try {
+						content_length_ = std::stoul(it->second);
+					} catch (const std::exception&) {
+						LOG_WARNING("无效的 Content-Length: {}", it->second);
+						state_ = ParseState::ERROR_;
+						reset();
+						return std::nullopt;
+					}
 
-			if (it != current_request_.headers.end()) {
-				content_length_ = std::stoul(it->second);//读取请求体的长度切换状态为解析BODY
-				state_ = ParseState::BODY;
+					// 检查请求体大小限制
+					if (content_length_ > max_body_size_) {
+						LOG_WARNING("请求体过大: {} bytes (最大允许: {})",
+							content_length_, max_body_size_);
+						state_ = ParseState::ERROR_;
+						reset();
+						return std::nullopt;
+					}
+
+					state_ = ParseState::BODY;
+					continue;  // 继续循环读取 body
+				}
+				else {
+					// 没有 body（GET/HEAD 请求）：直接完成
+					state_ = ParseState::COMPLETE;
+					continue;  // 回到循环顶部处理 COMPLETE
+				}
 			}
-			else {
-				//没有请求体直接标记解析完成
-				state_ = ParseState::COMPLETE;
-				auto request=std::move(current_request_);
-				reset();
-				return request;
-			}
-			continue;//继续循环，处理请求体
 		}
-		parseLine(line);//解析单行数据
+
+		parseLine(line);
 
 		if (state_ == ParseState::ERROR_) {
-			reset();//出错重置解析
+			reset();
 			return std::nullopt;
 		}
 	}
 }
 
 void HttpParser::parseLine(const std::string& line) {
-	switch (state_) {//根据解析状态，执行不同的逻辑
-		case ParseState::METHOD:{
+	switch (state_) {
+		case ParseState::METHOD: {
 			std::istringstream iss(line);
 			std::string method_str;
 			iss >> method_str;
-			//匹配支持的请求方法
+
 			if (method_str == "GET") {
 				current_request_.method = HttpMethod::GET;
 			}
 			else if (method_str == "HEAD") {
 				current_request_.method = HttpMethod::HEAD;
 			}
+			else if (method_str == "POST") {
+				current_request_.method = HttpMethod::POST;
+			}
+			else if (method_str == "PUT") {
+				current_request_.method = HttpMethod::PUT;
+			}
+			else if (method_str == "DELETE") {
+				current_request_.method = HttpMethod::DELETE_;
+			}
 			else {
 				current_request_.method = HttpMethod::UNSUPPORTED;
 			}
 
-			iss >> current_request_.path;//读取第二个请求路径
-			iss >> current_request_.version;//读取第三个：Http版本
-			state_ = ParseState::PATH;//切换状态
+			iss >> current_request_.path;
+			iss >> current_request_.version;
+			state_ = ParseState::PATH;
 			break;
 		}
 		case ParseState::PATH:
 		case ParseState::VERSION:
-		case ParseState::HEADER_VALUE: {
+		case ParseState::HEADER_VALUE:
+		case ParseState::HEADER_KEY: {
+			// 统一在 HEADER 相关状态处理：所有非空行尝试作为头部解析
 			size_t colon_pos = line.find(":");
 			if (colon_pos != std::string::npos) {
 				current_header_key_ = line.substr(0, colon_pos);
 				std::string value = line.substr(colon_pos + 1);
 
-				value.erase(0, value.find_first_not_of("\t"));
+				// 去除前导空白（空格和制表符）
+				value.erase(0, value.find_first_not_of(" \t"));
+				// 去除尾部空白和回车
+				while (!value.empty() &&
+					(value.back() == ' ' || value.back() == '\t' || value.back() == '\r')) {
+					value.pop_back();
+				}
 
 				current_request_.headers[current_header_key_] = value;
 
-				if (current_header_key_ == "Connection" && value.find("keep-alive") != std::string::npos) {
-					current_request_.keep_alive = true;
+				// 检测 Connection: keep-alive（不区分大小写）
+				if (current_header_key_ == "Connection") {
+					std::string lower_value = value;
+					std::transform(lower_value.begin(), lower_value.end(),
+						lower_value.begin(), ::tolower);
+					if (lower_value.find("keep-alive") != std::string::npos) {
+						current_request_.keep_alive = true;
+					}
 				}
 			}
+			// 保持当前状态，继续解析后续头部行
 			state_ = ParseState::HEADER_KEY;
 			break;
 		}
-		case ParseState::HEADER_KEY:
-			state_ = ParseState::HEADER_VALUE;
-			break;
 		default:
 			break;
 	}
